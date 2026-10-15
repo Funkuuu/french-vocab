@@ -1,13 +1,23 @@
 /* 法语单词 App 的 Service Worker
-   策略：外壳（页面/图标）安装时预缓存；audio/ 里的 mp3 按需缓存 —— 听过一次就存在本地，
-   之后断网也能听。三千多个 mp3 全部预缓存没必要也没那么快，所以走按需这条路。
 
-   ⚠ 音频**必须**处理 Range 请求：<audio> 拖进度条时浏览器发的是 Range 请求，
-   而 Cache 里存的是整份文件。如果直接把整份响应返回（忽略 Range），
-   浏览器会认为这个音源「不能跳转」（audio.seekable 变成空），进度条就拖不动了。
-   所以命中缓存时要按 Range 切出 206；缓存里没有时先取整份存下，再切。
-   想强制更新时，把下面的版本号改一下（v2 → v3）重新传即可。 */
-const CACHE = "fr-vocab-v2";
+   两种策略，按请求类型分开：
+
+   1) 页面本身 → 网络优先。
+      原来这里是「缓存优先」，结果是：只要 sw.js 没变，index.html 就永远从缓存里拿，
+      改了内容也发不出去（踩过：搜索框和彩条上线了，手机上却一直是旧版）。
+      现在先取网络，取不到（离线）再兜缓存，离线照样能用。
+
+   2) audio/ 里的 mp3、图标 → 缓存优先。
+      音频是**内容寻址**的：文件名就是朗读文本的哈希，内容改了文件名就变了，
+      所以缓存优先不会拿到过期文件，而且听过一次就永久离线可用。
+
+   ⚠ 音频必须处理 Range 请求：<audio> 拖进度条时浏览器发的是 Range 请求，
+   而缓存里存的是整份文件。直接返回整份会让浏览器认为「不能跳转」
+   （audio.seekable 为空），进度条就拖不动了。所以命中缓存时要按 Range 切出 206。
+   （这个坑也踩过，见 slice() / fillAndSlice()。）
+
+   想强制让所有人更新时，把下面的版本号改一下（v3 → v4）重新传。 */
+const CACHE = "fr-vocab-v3";
 
 const SHELL = [
   "./",
@@ -18,13 +28,19 @@ const SHELL = [
   "./icon-180.png"
 ];
 
+// 预缓存外壳。带上 cache:"reload" 绕过 HTTP 缓存，保证拿到的是最新一份
+async function precache(){
+  const c = await caches.open(CACHE);
+  await Promise.all(SHELL.map(async u => {
+    try{
+      const res = await fetch(u, { cache: "reload" });
+      if(res && res.ok) await c.put(u, res);
+    }catch(_){ /* 离线装不上就算了，用旧缓存顶 */ }
+  }));
+}
+
 self.addEventListener("install", e => {
-  e.waitUntil(
-    caches.open(CACHE)
-      .then(c => c.addAll(SHELL))
-      .then(() => self.skipWaiting())
-      .catch(() => self.skipWaiting())
-  );
+  e.waitUntil(precache().then(() => self.skipWaiting()).catch(() => self.skipWaiting()));
 });
 
 self.addEventListener("activate", e => {
@@ -73,6 +89,10 @@ async function fillAndSlice(req, cache, rangeHeader) {
   return rangeHeader ? slice(full, rangeHeader) : full;
 }
 
+const isDoc = req =>
+  req.mode === "navigate" || req.destination === "document" ||
+  /(\/|index\.html)$/.test(new URL(req.url).pathname);
+
 self.addEventListener("fetch", e => {
   const req = e.request;
   if (req.method !== "GET") return;
@@ -83,15 +103,26 @@ self.addEventListener("fetch", e => {
 
   const range = req.headers.get("range");
 
-  e.respondWith(
-    caches.open(CACHE).then(cache =>
-      cache.match(req).then(hit => {
-        if (hit) return range ? slice(hit, range) : hit;   // 有缓存：按需切片
-        return fillAndSlice(req, cache, range).catch(() =>
-          // 断网了：页面导航兜到 index.html，其它就返回错误
-          req.mode === "navigate" ? caches.match("./index.html") : Response.error()
-        );
-      })
-    )
-  );
+  e.respondWith(caches.open(CACHE).then(cache => {
+    // ---- 页面：网络优先，断了才用缓存 ----
+    if (isDoc(req)) {
+      // cache:"no-cache" = 每次都向服务器验证一下（不新鲜才重新下载）。
+      // GitHub Pages 给 index.html 的缓存是 10 分钟，不带这个的话
+      // 刚发的新版可能十几分钟才看得到。
+      return fetch(req, { cache: "no-cache" }).then(res => {
+        if (res && res.ok) cache.put("./index.html", res.clone());
+        return res;
+      }).catch(() =>
+        cache.match(req)
+          .then(h => h || cache.match("./index.html"))
+          .then(h => h || Response.error())
+      );
+    }
+
+    // ---- 音频 / 图标：缓存优先 ----
+    return cache.match(req).then(hit => {
+      if (hit) return range ? slice(hit, range) : hit;
+      return fillAndSlice(req, cache, range).catch(() => Response.error());
+    });
+  }));
 });
