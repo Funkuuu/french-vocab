@@ -378,6 +378,14 @@ table.conj tr.hl-ok td.p,table.conj tr.hl-no td.p{font-weight:700}
   .cfp{display:none}
   .bounce{animation:none}
 }
+
+/* ---- 教材来源署名 ---- */
+.src{margin:6px 16px 34px;padding:14px 16px;border:1px solid var(--line);border-radius:14px;
+  background:#fbfcfd;font-size:12px;line-height:1.9;color:var(--ink3)}
+.src b{display:block;color:var(--ink2);font-size:12.5px;margin-bottom:6px}
+.src .line{display:block}
+.srcline{margin-top:16px;padding-top:12px;border-top:1px dashed var(--line);
+  font-size:11.5px;line-height:1.75;color:var(--ink3)}
 </style>
 </head>
 <body>
@@ -393,6 +401,15 @@ const ROUND_NAME = ["第一遍","第二遍","第三遍"];
 const ROUND_HINT = ["看单词选中文意思","看例句判断","只看单词判断"];
 const BOX_DAYS = [0, 1, 2, 4, 7, 15, 30, 60];
 const DAY = 86400000;
+/* 教材来源（取自版权页「图书在版编目（CIP）数据」）。
+   合理使用成立的前提之一是「指明作品名称和作者」，所以首页和每个详情页都要标出来。 */
+const BOOK_TITLE = "《新经典法语 1 学生用书》（第二版）";
+const BOOK_CREDIT = "傅荣 总主编，胡瑜 主编，吴云凤 等编，外语教学与研究出版社，2022";
+/* 进度存在 localStorage 的这个键下：{lessons, words, wrong}
+   ⚠ **永远不要改这个字符串**。改了 = 所有人的学习进度当场清零
+     （新键读不到旧数据，旧数据还躺在老键上没人用）。
+     哪天真要换 key（比如存的结构变了），必须在这里把旧 key 加进 LEGACY
+     并在 load() 里读出来做迁移，不能直接换。 */
 const LS = "fr_vocab_v2";
 const app = document.getElementById("app");
 
@@ -730,7 +747,15 @@ function renderHome(){
     }
     html += `</div>`;
   }
-  html += `<div class="note" style="padding:20px 16px 30px">学完一课后，词会按 1 / 2 / 4 / 7 / 15 / 30 天的间隔回到「今日复习」</div>`;
+  html += `<div class="note" style="padding:20px 16px 10px">学完一课后，词会按 1 / 2 / 4 / 7 / 15 / 30 天的间隔回到「今日复习」</div>`;
+
+  html += `<div class="src">
+    <b>教材来源</b>
+    <span class="line">${esc(BOOK_TITLE)}，${esc(BOOK_CREDIT)}。</span>
+    <span class="line">词汇、课文与语法条目选自该教材；例句、中文译文、讲解与练习题均为自制内容。</span>
+    <span class="line">本工具仅供个人学习使用，不作任何商业用途。</span>
+  </div>`;
+
   app.innerHTML = html;
 
   app.querySelectorAll("[data-go]").forEach(e=> e.onclick = ()=>startLesson(parseInt(e.dataset.go,10), true));
@@ -1258,6 +1283,8 @@ function detailBody(w, tense){
   if(s.note){
     html += `<div class="block"><h3>提示 Note</h3><div style="font-size:14px;line-height:1.75;color:var(--ink2)">${esc(s.note)}</div></div>`;
   }
+  // 合理使用的前提之一是「指明作品名称和作者」，每个词的详情页都带上来源
+  html += `<div class="srcline">来源：${esc(BOOK_TITLE)} 第 ${w.s} 课　·　${esc(BOOK_CREDIT)}</div>`;
   return html;
 }
 function wireTense(w, reRender){
@@ -1512,6 +1539,7 @@ function renderTexteLesson(n){
     html += `</div>`;
   });
   html += `</div>`;
+  html += `<div class="srcline" style="margin:16px 16px 30px">课文选自 ${esc(BOOK_TITLE)} 第 ${n} 课　·　${esc(BOOK_CREDIT)}</div>`;
   app.innerHTML = html;
   window.scrollTo(0,0);
   document.getElementById("back").onclick = renderTexteIndex;
