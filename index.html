@@ -551,7 +551,9 @@ function speak(fr, silent){
       a.addEventListener("error", ()=>{          // 文件不存在 → 记下来，退回系统语音
         if(settled) return;
         settled = true; AUDIO_MISSING.add(text);
-        AUDIO_MODE = "tts";
+        // 这里**不能**改 AUDIO_MODE：少一个 mp3 只是这一句没声音，
+        // 不该让首页显示「没找到 audio 文件夹」那种误导提示。
+        // 有没有整个文件夹，由启动时的 probeAudio() 说了算。
         speakTTS(text, silent);
       });
       const p = a.play();
