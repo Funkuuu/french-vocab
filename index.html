@@ -1675,6 +1675,40 @@ function ttsSeq(text, onEnd){
    目标 key： "slot:xxx" 某个槽 / "pool" 池子 / null 丢在空白处（当成池子） */
 let DRAG = null, LAST_DROP = 0;
 
+/* 拖动时页面自动滚动。
+   手机屏幕窄，句子一长，词库和空位就不在同一个屏里；而拖拽元素的
+   touch-action 是 none（不关掉的话页面会跟着手指一起滚，拖不动），
+   所以手指贴到屏幕上下边缘时页面也不会滚 —— 结果就是拖不过去。
+   这里自己接管：指针离边缘近就滚，越近滚得越快，滚完重新算一次落点高亮。 */
+const EDGE_ZONE = 76;     // 指针离屏幕边缘多少 px 以内开始滚
+const EDGE_SPEED = 17;    // 贴到最边上时每帧滚多少 px
+let dragRAF = 0;
+
+function dragHit(){
+  document.querySelectorAll(".drop-hit").forEach(e=>e.classList.remove("drop-hit"));
+  if(!DRAG) return;
+  const el = document.elementFromPoint(DRAG.cx, DRAG.cy);
+  const t = el && el.closest ? el.closest("[data-drop]") : null;
+  if(t) t.classList.add("drop-hit");
+}
+
+function dragTick(){
+  if(!DRAG){ dragRAF = 0; return; }
+  const h = window.innerHeight, y = DRAG.cy;
+  // 0（刚进边缘区）→ 1（贴到边上甚至拖出屏幕），用来控制滚动速度
+  let k = 0;
+  if(y < EDGE_ZONE) k = (EDGE_ZONE - y) / EDGE_ZONE;
+  else if(y > h - EDGE_ZONE) k = (y - (h - EDGE_ZONE)) / EDGE_ZONE;
+  if(k > 0){
+    k = Math.min(k, 1);
+    const before = window.scrollY;
+    window.scrollBy(0, (y < h / 2 ? -1 : 1) * Math.ceil(k * EDGE_SPEED));
+    // 页面真的动了，手指底下的元素就变了，高亮要跟着重算
+    if(window.scrollY !== before) dragHit();
+  }
+  dragRAF = requestAnimationFrame(dragTick);
+}
+
 function dragBegin(ev, payload, ghostText, onEnd){
   if(ev.button != null && ev.button !== 0) return;
   ev.preventDefault();
@@ -1684,10 +1718,11 @@ function dragBegin(ev, payload, ghostText, onEnd){
   g.style.left = ev.clientX + "px";
   g.style.top = ev.clientY + "px";
   document.body.appendChild(g);
-  DRAG = {payload, g, sx: ev.clientX, sy: ev.clientY, moved: false, onEnd};
+  DRAG = {payload, g, sx: ev.clientX, sy: ev.clientY, cx: ev.clientX, cy: ev.clientY, moved: false, onEnd};
   window.addEventListener("pointermove", dragMove);
   window.addEventListener("pointerup", dragDone);
   window.addEventListener("pointercancel", dragDone);
+  dragRAF = requestAnimationFrame(dragTick);
 }
 
 function dragDone(ev){
@@ -1695,11 +1730,15 @@ function dragDone(ev){
   window.removeEventListener("pointermove", dragMove);
   window.removeEventListener("pointerup", dragDone);
   window.removeEventListener("pointercancel", dragDone);
+  cancelAnimationFrame(dragRAF); dragRAF = 0;
   const d = DRAG; DRAG = null; LAST_DROP = Date.now();
   if(d.g.parentNode) d.g.parentNode.removeChild(d.g);
   document.querySelectorAll(".drop-hit").forEach(e=>e.classList.remove("drop-hit"));
   if(!d.moved){ d.onEnd(null, false); return; }        // 只是点了一下，不当拖动
-  const el = document.elementFromPoint(ev.clientX, ev.clientY);
+  // pointercancel（手机上手势被系统抢走）时坐标不可信，用最后一次 move 的位置
+  const cx = ev.type === "pointercancel" ? d.cx : ev.clientX;
+  const cy = ev.type === "pointercancel" ? d.cy : ev.clientY;
+  const el = document.elementFromPoint(cx, cy);
   const t = el && el.closest ? el.closest("[data-drop]") : null;
   d.onEnd(t ? t.dataset.drop : null, true);
 }
@@ -1707,12 +1746,10 @@ function dragDone(ev){
 function dragMove(ev){
   if(!DRAG) return;
   if(Math.abs(ev.clientX - DRAG.sx) + Math.abs(ev.clientY - DRAG.sy) > 6) DRAG.moved = true;
+  DRAG.cx = ev.clientX; DRAG.cy = ev.clientY;
   DRAG.g.style.left = ev.clientX + "px";
   DRAG.g.style.top = ev.clientY + "px";
-  document.querySelectorAll(".drop-hit").forEach(e=>e.classList.remove("drop-hit"));
-  const el = document.elementFromPoint(ev.clientX, ev.clientY);
-  const t = el && el.closest ? el.closest("[data-drop]") : null;
-  if(t) t.classList.add("drop-hit");
+  dragHit();
 }
 
 /* ================= 小游戏 1：填空（拖拽 / 点选 + 检查） ================= */

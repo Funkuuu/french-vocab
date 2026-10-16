@@ -16,8 +16,8 @@
    （audio.seekable 为空），进度条就拖不动了。所以命中缓存时要按 Range 切出 206。
    （这个坑也踩过，见 slice() / fillAndSlice()。）
 
-   想强制让所有人更新时，把下面的版本号改一下（v3 → v4）重新传。 */
-const CACHE = "fr-vocab-v5";
+   想强制让所有人更新时，把下面的版本号 +1 再重新传。 */
+const CACHE = "fr-vocab-v6";
 
 const SHELL = [
   "./",
