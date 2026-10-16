@@ -1751,6 +1751,53 @@ function dragGhost(src, r){
   return {node: c, w: r.width};
 }
 
+/* 被拿起来之后，原处要空出来。分两种情况，靠「自己是不是落点」来区分
+   （槽位 .oslot / .czslot 自己带 data-drop；池子和词库里的选项没有）：
+
+   - 槽位：**留在原位**，变回还没放东西的样子（排序题回到「把句子拖到这里」，
+     填空题回到虚线空框）。不能移出排版流 —— 那样后面几格会跟着往上挪，
+     序号就全乱了。
+   - 池子 / 词库里的选项：**移出排版流**，后面的选项立刻补上来，不留空档。
+
+   原样存在元素自己身上，松手时放回去。onEnd 大多数情况会重渲染（那到时这个
+   节点已经脱离文档，放不回去也无所谓）；但「拖回原位」这种不走重渲染的路径
+   全靠它 —— 不还原的话那一格会永远停在「空位」的样子。 */
+function dragLift(src){
+  if(src.hasAttribute("data-drop")){
+    src.__lift = {cls: src.className, html: src.innerHTML};
+    src.classList.remove("full", "ok", "no");
+    const num = src.querySelector(".onum");
+    if(num) src.innerHTML = `<span class="onum">${esc(num.textContent.trim())}</span>`
+                          + `<span class="oempty">把句子拖到这里</span>`;
+    else src.textContent = "";            // 填空题的空位本来就是空的
+    // 顶栏那个 "3/4" 的计数也减一，不然「格子已经空了、头里还说放了 3 个」很别扭
+    const pill = document.querySelector(".topbar .pill");
+    const m = pill && /^(\d+)\/(\d+)$/.exec(pill.textContent.trim());
+    if(m){
+      src.__lift.pill = pill.textContent;
+      pill.textContent = (parseInt(m[1], 10) - 1) + "/" + m[2];
+    }
+  }else{
+    src.__lift = {display: src.style.display};
+    src.style.display = "none";
+  }
+}
+
+function dragDrop(src){
+  const s = src.__lift;
+  if(!s) return;
+  if("html" in s){
+    src.className = s.cls; src.innerHTML = s.html;
+    // 计数只有在没有重新渲染时才有还原的必要（重渲染会自己算对）
+    if(s.pill != null){
+      const pill = document.querySelector(".topbar .pill");
+      if(pill) pill.textContent = s.pill;
+    }
+  }
+  else src.style.display = s.display;
+  delete src.__lift;
+}
+
 function dragBegin(ev, payload, ghostText, onEnd){
   if(ev.button != null && ev.button !== 0) return;
   ev.preventDefault();
@@ -1793,25 +1840,24 @@ function dragDone(ev){
   const d = DRAG; DRAG = null; LAST_DROP = Date.now();
   if(d.g.parentNode) d.g.parentNode.removeChild(d.g);
   document.querySelectorAll(".drop-hit").forEach(e=>e.classList.remove("drop-hit"));
-  if(d.src) d.src.style.opacity = "";                  // 把收起来的原块放回去
-  if(!d.moved){ d.onEnd(null, false); return; }        // 只是点了一下，不当拖动
+  if(!d.moved){ if(d.src) dragDrop(d.src); d.onEnd(null, false); return; }   // 只是点了一下，不当拖动
   // pointercancel（手机上手势被系统抢走）时坐标不可信，用最后一次 move 的位置
   const cx = ev.type === "pointercancel" ? d.cx : ev.clientX;
   const cy = ev.type === "pointercancel" ? d.cy : ev.clientY;
+  // 落点必须在**还原之前**算：还原会让被拿走的那一项重新排回列表里，
+  // 底下的东西跟着挪位，那时候再算就跟你刚才看到的落点高亮对不上了。
   const el = document.elementFromPoint(cx, cy);
   const t = el && el.closest ? el.closest("[data-drop]") : null;
-  d.onEnd(t ? t.dataset.drop : null, true);
+  const target = t ? t.dataset.drop : null;
+  if(d.src) dragDrop(d.src);                           // 把空出来的原位还原
+  d.onEnd(target, true);
 }
 
 function dragMove(ev){
   if(!DRAG) return;
   if(!DRAG.moved && Math.abs(ev.clientX - DRAG.sx) + Math.abs(ev.clientY - DRAG.sy) > 6){
     DRAG.moved = true;
-    // 真的拖起来了：把原处那个块收起来（还占着位置，别的块不会跳位）。
-    // 用 opacity:0 而不是 visibility:hidden / display:none ——
-    // opacity:0 的元素**照样参与命中测试**，拖回原位时还能落回原来那个空位；
-    // 换成 visibility:hidden 就只会命中「空白处」，排序题里会把句子退回词库。
-    if(DRAG.src) DRAG.src.style.opacity = "0";
+    if(DRAG.src) dragLift(DRAG.src);     // 真的拖起来了，原处空出来（见 dragLift）
   }
   DRAG.cx = ev.clientX; DRAG.cy = ev.clientY;
   // 保持「手指抓在块内哪个位置」这个偏移不变，块才像是被拎着走，而不是中心粘在手指上
