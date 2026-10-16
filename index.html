@@ -1722,7 +1722,9 @@ function dragBegin(ev, payload, ghostText, onEnd){
   window.addEventListener("pointermove", dragMove);
   window.addEventListener("pointerup", dragDone);
   window.addEventListener("pointercancel", dragDone);
-  dragRAF = requestAnimationFrame(dragTick);
+  // 这里**不**启动自动滚动：手指刚按下还没动，若落点本来就贴着屏幕边缘，
+  // 页面会自己滚起来 —— 可「轻点一下就放进去」本来是不该动页面的。
+  // 等 dragMove 确认真的拖动了再启动。
 }
 
 function dragDone(ev){
@@ -1750,6 +1752,8 @@ function dragMove(ev){
   DRAG.g.style.left = ev.clientX + "px";
   DRAG.g.style.top = ev.clientY + "px";
   dragHit();
+  // 真的拖起来了，才开始盯着边缘自动滚
+  if(DRAG.moved && !dragRAF) dragRAF = requestAnimationFrame(dragTick);
 }
 
 /* ================= 小游戏 1：填空（拖拽 / 点选 + 检查） ================= */
