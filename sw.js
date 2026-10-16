@@ -17,7 +17,7 @@
    （这个坑也踩过，见 slice() / fillAndSlice()。）
 
    想强制让所有人更新时，把下面的版本号 +1 再重新传。 */
-const CACHE = "fr-vocab-v7";
+const CACHE = "fr-vocab-v8";
 
 const SHELL = [
   "./",

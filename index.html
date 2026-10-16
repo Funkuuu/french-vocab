@@ -291,6 +291,11 @@ table.conj td.sp2 .sp{width:28px;font-size:13px;background:none;border:none}
 .czdrag{position:fixed;z-index:999;pointer-events:none;border:1px solid var(--brand);background:#fff;
   border-radius:11px;padding:9px 14px;font-size:15px;box-shadow:0 10px 26px rgba(0,0,0,.2);
   transform:translate(-50%,-50%);font-family:inherit;color:var(--ink)}
+/* 拖的是句子块时，影子里放的是原块的克隆，靠它自己撑出样子。
+   所以这一层不能再有自己的框/内边距/底色，否则两层叠在一起就不是原块的形状了。
+   display:flex 是为了让克隆体作为 flex 项被块化，免得 inline-block 产生行盒、
+   把外层顶得比原块高一点（那样位置会偏）。宽度由 JS 写死，见 dragBegin。 */
+.czdrag-clone{display:flex;padding:0;border:0;background:none;border-radius:0;box-shadow:none}
 .czfoot{display:flex;gap:10px;align-items:center;justify-content:center;flex-wrap:wrap;
   margin-top:20px;padding-top:16px;border-top:1px solid var(--line)}
 .czfoot .btn{padding:13px 22px;font-size:15.5px}
@@ -1709,12 +1714,58 @@ function dragTick(){
   dragRAF = requestAnimationFrame(dragTick);
 }
 
+/* 拖动时跟着手指走的那个「影子」。
+   注意：宽度**必须写死**。影子是 position:fixed 且只设了 left，
+   没写宽度时收缩宽度 = 视口宽 − left，于是往右拖可用宽度就变小、
+   文字重新折行，块自己越拖越窄越高 —— 看起来就是「形状在变」。
+   写死之后 (1) 不再随位置变形，(2) 跟原块一样宽，折行位置也一致。 */
+// 只抄外观，不抄 width/height/margin/flex —— 尺寸交给「根节点写死到原块大小 + 子节点自然排布」，
+// 抄了反而会和外层写死的宽高打架。
+const GHOST_COPY = ["display","background-color","background-image","border","border-radius",
+  "padding","color","font-family","font-size","font-weight","font-style","line-height",
+  "letter-spacing","text-align","align-items","justify-content","gap"];
+
+function dragGhost(src){
+  const r = src.getBoundingClientRect();
+  const c = src.cloneNode(true);
+  // 克隆体被挪到 body 底下，`.opool .oitem` 这种「靠祖先才生效」的规则就不再匹配，
+  // 卡片的白底和边框会整片掉 —— 何况拖拽源常常是没样式的包装 div，样式挂在它内部的子元素上。
+  // 所以按顺序把原树每一层的计算样式都抄到克隆树的对应节点上。
+  // 抄计算值而不是把类名写死，以后改 CSS 这里不用跟着动。
+  const from = [src, ...src.querySelectorAll("*")];
+  const to   = [c,   ...c.querySelectorAll("*")];
+  from.forEach((s, i)=>{
+    const cs = getComputedStyle(s);
+    GHOST_COPY.forEach(p => to[i].style.setProperty(p, cs.getPropertyValue(p)));
+  });
+  to.forEach(el=>{
+    el.removeAttribute("id");
+    // 影子是 pointer-events:none，本来就点不到；清掉 data-* 只是不想让它
+    // 出现在任何 querySelector 的结果里
+    [...el.attributes].forEach(a => { if(a.name.indexOf("data-") === 0) el.removeAttribute(a.name); });
+  });
+  c.style.margin = "0";                // 原块的外边距不能带进来，会把影子顶偏
+  // 写死宽高 —— 形状不变的关键（原因见上面的说明）
+  c.style.width  = r.width  + "px";
+  c.style.height = r.height + "px";
+  c.style.boxShadow = "0 10px 22px rgba(0,0,0,.22)";
+  return {node: c, w: r.width};
+}
+
 function dragBegin(ev, payload, ghostText, onEnd){
   if(ev.button != null && ev.button !== 0) return;
   ev.preventDefault();
   const g = document.createElement("div");
   g.className = "czdrag";
-  g.textContent = ghostText;
+  const src = ev.currentTarget;          // 被按住的那个块（事件派发期间才有效，这里正是）
+  if(src && src.nodeType === 1){
+    const ghost = dragGhost(src);
+    g.classList.add("czdrag-clone");
+    g.style.width = ghost.w + "px";      // 外层也得写死，否则它自己会收缩成窄条
+    g.appendChild(ghost.node);
+  }else{
+    g.textContent = ghostText;
+  }
   g.style.left = ev.clientX + "px";
   g.style.top = ev.clientY + "px";
   document.body.appendChild(g);
