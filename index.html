@@ -290,7 +290,7 @@ table.conj td.sp2 .sp{width:28px;font-size:13px;background:none;border:none}
 .czword.used{opacity:.22;pointer-events:none}
 .czdrag{position:fixed;z-index:999;pointer-events:none;border:1px solid var(--brand);background:#fff;
   border-radius:11px;padding:9px 14px;font-size:15px;box-shadow:0 10px 26px rgba(0,0,0,.2);
-  transform:translate(-50%,-50%);font-family:inherit;color:var(--ink)}
+  font-family:inherit;color:var(--ink)}
 /* 拖的是句子块时，影子里放的是原块的克隆，靠它自己撑出样子。
    所以这一层不能再有自己的框/内边距/底色，否则两层叠在一起就不是原块的形状了。
    display:flex 是为了让克隆体作为 flex 项被块化，免得 inline-block 产生行盒、
@@ -1725,8 +1725,7 @@ const GHOST_COPY = ["display","background-color","background-image","border","bo
   "padding","color","font-family","font-size","font-weight","font-style","line-height",
   "letter-spacing","text-align","align-items","justify-content","gap"];
 
-function dragGhost(src){
-  const r = src.getBoundingClientRect();
+function dragGhost(src, r){
   const c = src.cloneNode(true);
   // 克隆体被挪到 body 底下，`.opool .oitem` 这种「靠祖先才生效」的规则就不再匹配，
   // 卡片的白底和边框会整片掉 —— 何况拖拽源常常是没样式的包装 div，样式挂在它内部的子元素上。
@@ -1758,24 +1757,31 @@ function dragBegin(ev, payload, ghostText, onEnd){
   const g = document.createElement("div");
   g.className = "czdrag";
   const src = ev.currentTarget;          // 被按住的那个块（事件派发期间才有效，这里正是）
+  // 手指抓在这个块内的哪个位置。影子要一直保持这个偏移，
+  // 块才是「从原地被拎起来」的；否则影子中心会啪地跳到手指底下，块像瞬移了。
+  let offX = 0, offY = 0;
   if(src && src.nodeType === 1){
-    const ghost = dragGhost(src);
+    const r = src.getBoundingClientRect();
+    offX = ev.clientX - r.left;
+    offY = ev.clientY - r.top;
+    const ghost = dragGhost(src, r);
     g.classList.add("czdrag-clone");
     g.style.width = ghost.w + "px";      // 外层也得写死，否则它自己会收缩成窄条
     g.appendChild(ghost.node);
   }else{
     g.textContent = ghostText;
   }
-  g.style.left = ev.clientX + "px";
-  g.style.top = ev.clientY + "px";
+  g.style.left = (ev.clientX - offX) + "px";
+  g.style.top  = (ev.clientY - offY) + "px";
   document.body.appendChild(g);
-  DRAG = {payload, g, sx: ev.clientX, sy: ev.clientY, cx: ev.clientX, cy: ev.clientY, moved: false, onEnd};
+  DRAG = {payload, g, src, offX, offY,
+          sx: ev.clientX, sy: ev.clientY, cx: ev.clientX, cy: ev.clientY, moved: false, onEnd};
   window.addEventListener("pointermove", dragMove);
   window.addEventListener("pointerup", dragDone);
   window.addEventListener("pointercancel", dragDone);
-  // 这里**不**启动自动滚动：手指刚按下还没动，若落点本来就贴着屏幕边缘，
-  // 页面会自己滚起来 —— 可「轻点一下就放进去」本来是不该动页面的。
-  // 等 dragMove 确认真的拖动了再启动。
+  // 这里**不**启动自动滚动，也**不**把原块收起来：
+  // 手指刚按下还没动，若落点本来就贴着屏幕边缘，页面会自己滚起来 ——
+  // 可「轻点一下就放进去」本来是不该动页面的。等 dragMove 确认真的拖动了再做。
 }
 
 function dragDone(ev){
@@ -1787,6 +1793,7 @@ function dragDone(ev){
   const d = DRAG; DRAG = null; LAST_DROP = Date.now();
   if(d.g.parentNode) d.g.parentNode.removeChild(d.g);
   document.querySelectorAll(".drop-hit").forEach(e=>e.classList.remove("drop-hit"));
+  if(d.src) d.src.style.opacity = "";                  // 把收起来的原块放回去
   if(!d.moved){ d.onEnd(null, false); return; }        // 只是点了一下，不当拖动
   // pointercancel（手机上手势被系统抢走）时坐标不可信，用最后一次 move 的位置
   const cx = ev.type === "pointercancel" ? d.cx : ev.clientX;
@@ -1798,10 +1805,18 @@ function dragDone(ev){
 
 function dragMove(ev){
   if(!DRAG) return;
-  if(Math.abs(ev.clientX - DRAG.sx) + Math.abs(ev.clientY - DRAG.sy) > 6) DRAG.moved = true;
+  if(!DRAG.moved && Math.abs(ev.clientX - DRAG.sx) + Math.abs(ev.clientY - DRAG.sy) > 6){
+    DRAG.moved = true;
+    // 真的拖起来了：把原处那个块收起来（还占着位置，别的块不会跳位）。
+    // 用 opacity:0 而不是 visibility:hidden / display:none ——
+    // opacity:0 的元素**照样参与命中测试**，拖回原位时还能落回原来那个空位；
+    // 换成 visibility:hidden 就只会命中「空白处」，排序题里会把句子退回词库。
+    if(DRAG.src) DRAG.src.style.opacity = "0";
+  }
   DRAG.cx = ev.clientX; DRAG.cy = ev.clientY;
-  DRAG.g.style.left = ev.clientX + "px";
-  DRAG.g.style.top = ev.clientY + "px";
+  // 保持「手指抓在块内哪个位置」这个偏移不变，块才像是被拎着走，而不是中心粘在手指上
+  DRAG.g.style.left = (ev.clientX - DRAG.offX) + "px";
+  DRAG.g.style.top  = (ev.clientY - DRAG.offY) + "px";
   dragHit();
   // 真的拖起来了，才开始盯着边缘自动滚
   if(DRAG.moved && !dragRAF) dragRAF = requestAnimationFrame(dragTick);
