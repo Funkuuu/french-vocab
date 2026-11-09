@@ -231,6 +231,9 @@ table.conj td.sp2 .sp{width:28px;font-size:13px;background:none;border:none}
 .unvocab .chiprow{margin-top:10px}
 .unvocab .chip b{font-weight:600}
 .unvocab .chip em{margin:0 0 0 5px;font-size:11px;color:var(--ink3)}
+.unvocab .chip .gn{font-style:normal;font-size:10.5px;color:var(--brand);font-weight:700;margin-left:4px}
+.wordchip{cursor:pointer;font-family:inherit;color:inherit;line-height:1.35}
+.wordchip:active{background:var(--brand-soft)}
 .gblock{background:var(--card);border:1px solid var(--line);border-radius:var(--r);
   padding:16px 18px;box-shadow:var(--shadow);margin-bottom:14px;
   scroll-margin-top:76px}   /* 顶栏是 sticky 的，从分类页跳进来时别被它盖住 */
@@ -500,6 +503,7 @@ let S = null;
 /* ---------------- 全局搜索：任何界面都能打开，返回时回到进来之前的界面 ---------------- */
 let SEARCH_QUERY = "";
 let SEARCH_BACK = renderHome;
+let WORD_BACK = null;          // 从单元词表点进详情时，返回那个索引页
 let LAST_GRAMMAR = renderGrammarIndex;
 let LAST_SQ_INDEX = renderConjIndex;
 let TEXTE_CUR = null;
@@ -1071,7 +1075,7 @@ function renderSearch(q, back){
     box.innerHTML = searchResultsHTML(inp.value, res);
     app.querySelectorAll("#sres [data-fr]").forEach(e => e.onclick = ()=>{
       const w = SEARCH_WORDS.find(x => x.fr === e.dataset.fr);
-      if(w){ SV.w = w; SV.tense = "pr"; SV.from = inp.value; renderWordView(); }
+      if(w){ SV.w = w; SV.tense = "pr"; SV.from = inp.value; WORD_BACK = null; renderWordView(); }
     });
   };
   inp.addEventListener("input", paint);
@@ -1097,6 +1101,11 @@ function renderSearch(q, back){
 }
 
 // 从搜索点进来的详情页，和错词本那个共用 detailBody
+function wordViewBack(){
+  if(WORD_BACK){ const f = WORD_BACK; WORD_BACK = null; f(); return; }
+  renderSearch(SV.from);
+}
+
 function renderWordView(){
   screen = "wordview";
   const w = SV.w;
@@ -1108,15 +1117,14 @@ function renderWordView(){
   </div>
   <div class="detail">
     ${detailBody(w, SV.tense)}
-    <div class="footer"><button class="btn ghost wide" id="back2">‹ 回到搜索</button></div>
+    <div class="footer"><button class="btn ghost wide" id="back2">‹ ${WORD_BACK ? "返回" : "回到搜索"}</button></div>
   </div>`;
   window.scrollTo(0, 0);
   prefetchAudio([w.fr, w.ex, ...(w.more || []).map(x => x.s)]);
   autoSpeak(w.fr);
   wireTense(w, t => { SV.tense = t; renderWordView(); });
-  const back = ()=> renderSearch(SV.from);
-  document.getElementById("back").onclick = back;
-  document.getElementById("back2").onclick = back;
+  document.getElementById("back").onclick = wordViewBack;
+  document.getElementById("back2").onclick = wordViewBack;
 }
 
 /* ---------------- 错词本 ---------------- */
@@ -2712,11 +2720,23 @@ const otherForUnit = nums => WORDS.filter(w => {
   return !looksLikePrepPhrase(w) && !isAdvPhrase(w) && !VERB_PHRASE_HEAD.test(w.fr);
 });
 
+function genderLabel(w){
+  const p = w.pos || "";
+  if(/(^|&)n\.m\.pl\./.test(p)) return "m.pl.";
+  if(/(^|&)n\.f\.pl\./.test(p)) return "f.pl.";
+  if(/(^|&)n\.m\./.test(p)) return "m.";
+  if(/(^|&)n\.f\./.test(p)) return "f.";
+  if(/(^n\.|&n\.)/.test(p)) return "m./f.";   // élève / architecte 这类通性名词
+  return "";
+}
+
 function unitVocab(title, words){
   if(!words || !words.length) return "";
   return `<details class="unvocab"><summary>${esc(title)} · ${words.length} 个</summary>
-    <div class="chiprow">${words.map(w =>
-      `<span class="chip"><b>${esc(w.fr)}</b><em>${esc(w.zh)}</em></span>`).join("")}</div></details>`;
+    <div class="chiprow">${words.map(w => {
+      const g = genderLabel(w);
+      return `<button class="chip wordchip" data-word="${esc(w.fr)}"><b>${esc(w.fr)}</b>${g ? `<i class="gn">${g}</i>` : ""}<em>${esc(w.zh)}</em></button>`;
+    }).join("")}</div></details>`;
 }
 
 function renderConjIndex(){
@@ -3028,6 +3048,33 @@ const syncGbar = ()=>{
   document.body.classList.toggle("no-gbar", screen === "search");
 };
 new MutationObserver(syncGbar).observe(app, {childList: true});
+
+/* 点单元词表里的词 → 详情页；返回时回到原索引页，并恢复展开的列表和滚动位置 */
+function openWordFromList(w){
+  const openPanels = [...app.querySelectorAll("details.unvocab")]
+    .map((d, i)=> d.open ? i : -1).filter(i=> i >= 0);
+  const y = window.scrollY;
+  const render = LAST_SQ_INDEX || renderHome;
+  WORD_BACK = ()=>{
+    render();
+    setTimeout(()=>{
+      const ds = [...app.querySelectorAll("details.unvocab")];
+      openPanels.forEach(i=>{ if(ds[i]) ds[i].open = true; });
+      window.scrollTo(0, y);
+    }, 0);
+  };
+  SV.w = w; SV.tense = "pr"; SV.from = "";
+  renderWordView();
+}
+
+app.addEventListener("click", e=>{
+  const b = e.target.closest("[data-word]");
+  if(!b) return;
+  e.preventDefault();
+  e.stopPropagation();
+  const w = WORDS.find(x => x.fr === b.dataset.word);
+  if(w) openWordFromList(w);
+});
 
 document.getElementById("gbar").onclick = ()=>{
   if(screen === "search"){
