@@ -379,6 +379,13 @@ table.conj tr.hl-ok td.p,table.conj tr.hl-no td.p{font-weight:700}
 .sbox input::-webkit-search-cancel-button{-webkit-appearance:none;display:none}
 .shint{padding:12px 16px 4px;font-size:13px;color:var(--ink3);line-height:1.75}
 .shint b{color:var(--ink2)}
+.hwrap{padding:12px 16px 4px}
+.hhead{display:flex;justify-content:space-between;align-items:center;font-size:12.5px;color:var(--ink2);margin-bottom:8px}
+.hclear{border:none;background:none;color:var(--ink3);font-size:12px;cursor:pointer;font-family:inherit;padding:0}
+.hchip{font-family:inherit;cursor:pointer}
+.unlab{font-size:11.5px;color:var(--ink3);margin:12px 0 4px}
+.minibtn{border:none;background:var(--brand-soft);color:var(--brand);font-size:11px;padding:4px 8px;
+  border-radius:8px;margin-top:6px;font-family:inherit;cursor:pointer}
 .slist{padding:4px 16px 30px}
 .srow{display:flex;gap:12px;align-items:center;padding:13px 16px;
   border-top:1px solid var(--line);cursor:pointer}
@@ -487,6 +494,10 @@ const DAY = 86400000;
    合理使用成立的前提之一是「指明作品名称和作者」，所以首页和每个详情页都要标出来。 */
 const BOOK_TITLE = "《新经典法语 1 学生用书》（第二版）";
 const BOOK_CREDIT = "傅荣 总主编，胡瑜 主编，吴云凤 等编，外语教学与研究出版社，2022";
+/* 版本号：和 android/version.json 保持一致。发布新 APK 时两边一起改。 */
+const APP_VERSION = { code: 2, name: "1.1" };
+const UPDATE_PAGE = "https://funkuuu.github.io/french-vocab/update.html";
+const VERSION_JS = "https://funkuuu.github.io/french-vocab/version.js";
 /* 进度存在 localStorage 的这个键下：{lessons, words, wrong}
    ⚠ **永远不要改这个字符串**。改了 = 所有人的学习进度当场清零
      （新键读不到旧数据，旧数据还躺在老键上没人用）。
@@ -504,9 +515,26 @@ let S = null;
 let SEARCH_QUERY = "";
 let SEARCH_BACK = renderHome;
 let WORD_BACK = null;          // 从单元词表点进详情时，返回那个索引页
+let SEARCH_HISTORY = (()=>{
+  try{
+    const a = JSON.parse(localStorage.getItem(LS + "_search_history"));
+    return Array.isArray(a) ? a.filter(x => typeof x === "string").slice(0, 20) : [];
+  }catch(e){ return []; }
+})();
+function saveSearchHistory(){
+  try{ localStorage.setItem(LS + "_search_history", JSON.stringify(SEARCH_HISTORY)); }catch(e){}
+}
+function addSearchHistory(q){
+  q = String(q || "").trim();
+  if(!q) return;
+  SEARCH_HISTORY = [q, ...SEARCH_HISTORY.filter(x => x !== q)].slice(0, 20);
+  saveSearchHistory();
+}
+function clearSearchHistory(){ SEARCH_HISTORY = []; saveSearchHistory(); }
 let LAST_GRAMMAR = renderGrammarIndex;
 let LAST_SQ_INDEX = renderConjIndex;
 let TEXTE_CUR = null;
+let PREP_VIEW = null;          // {key, back}：介词详情页，供全局搜索返回用
 
 // 把「当前这个界面」变成一个可以重放的函数（各页状态都还留在全局变量里）。
 // 全局搜索栏打开搜索页时先抓一份，搜索页的返回键就调它。
@@ -529,6 +557,8 @@ function currentScreenRenderer(){
     case "sqindex":  return ()=> (LAST_SQ_INDEX || renderHome)();
     case "sq":       return ()=>renderSQ(true);
     case "sqdone":   return sqFinish;
+    case "prepview": return ()=> (PREP_VIEW ? renderPrepDetail(PREP_VIEW.key, PREP_VIEW.back) : renderPrepIndex());
+    case "backup":   return renderBackup;
     default:         return renderHome;
   }
 }
@@ -602,14 +632,21 @@ function initVoices(){
 }
 // 去掉词条里的语法标注，只念法语本身
 function speakText(fr){
-  return String(fr)
+  let s = String(fr)
     .replace(/\(-\)/g, "-")
     .replace(/\s*\(.*?\)\s*/g, " ")
     .replace(/\s*\/\s*/g, ", ")
     .replace(/,\s*(e|s|se|sse|ne|ve|te|le|ue|ère|che|nouvelle|nouveaux)\s*$/i, "")
     .replace(/\s+([,?!.])/g, "$1")
-    .replace(/\s+/g, " ")
-    .trim();
+    .replace(/\s+/g, " ");
+  // 和 make_audio.py 的 speak_text() 保持一致：显示不变，只改实际朗读/取音频的文本
+  if(s.trim() === "l'") s = "le";
+  s = s.replace(/\bqch\.?/gi, "quelque chose")
+       .replace(/\bqqch\.?/gi, "quelque chose")
+       .replace(/\bqn\.?/gi, "quelqu'un")
+       .replace(/\bqqn\.?/gi, "quelqu'un")
+       .replace(/\briz\b/gi, "ri");
+  return s.trim();
 }
 let AUTO = (()=>{ try{ return localStorage.getItem(LS + "_auto") !== "0"; }catch(e){ return true; } })();
 function setAuto(v){
@@ -814,6 +851,88 @@ function lessonDue(n){
   }).length;
 }
 
+/* ---------------- 检查更新 / 进度备份 ---------------- */
+function checkUpdate(){
+  const installed = (window.AndroidApp && window.AndroidApp.versionCode)
+    ? AndroidApp.versionCode() : APP_VERSION.code;
+  const openPage = ()=>{
+    if(window.AndroidApp && window.AndroidApp.openUrl) AndroidApp.openUrl(UPDATE_PAGE);
+    else window.open(UPDATE_PAGE, "_blank");
+  };
+  const s = document.createElement("script");
+  s.src = VERSION_JS + "?t=" + Date.now();
+  s.onload = ()=>{
+    const v = window.__APP_VERSION || {};
+    try{ s.remove(); }catch(e){}
+    if((v.code || 0) > installed){
+      if(confirm("发现新版本 " + (v.name || v.code) + "。\n\n下载后覆盖安装即可，学习进度会保留。\n现在打开下载页吗？")) openPage();
+    }else{
+      toast("已经是最新版本（" + (v.name || APP_VERSION.name) + "）");
+    }
+  };
+  s.onerror = ()=>{ try{ s.remove(); }catch(e){} toast("检查更新失败，请检查网络"); };
+  document.head.appendChild(s);
+}
+
+function backupPayload(){
+  let progress = null;
+  try{ progress = JSON.parse(localStorage.getItem(LS)); }catch(e){}
+  if(!progress || typeof progress !== "object" || !progress.words) progress = blank();
+  return JSON.stringify({
+    app: "french-vocab",
+    exportedAt: new Date().toISOString(),
+    progress,
+    history: SEARCH_HISTORY
+  }, null, 1);
+}
+
+function renderBackup(){
+  screen = "backup";
+  stopAll();
+  const txt = backupPayload();
+  app.innerHTML = `
+  <div class="topbar"><div class="back" id="back">‹</div>
+    <div class="ttl">进度备份</div><div class="pill">导出 / 导入</div></div>
+  <div class="ghead"><h1>进度备份</h1>
+    <div class="sub">换手机、重装或换版本前，先把这段文字复制保存；装好后粘贴回来点「导入」。
+      备份包含学习进度、错词本和查词历史。</div></div>
+  <div class="wrap">
+    <textarea id="bak" spellcheck="false"
+      style="width:100%;height:230px;font-family:ui-monospace,Consolas,monospace;font-size:12px;
+      line-height:1.5;border:1px solid var(--line);border-radius:12px;padding:10px;background:#fff">${esc(txt)}</textarea>
+    <button class="btn primary wide" id="copy">复制全部</button>
+    <button class="btn ghost wide" id="import">导入这段备份</button>
+    <div class="note">导入会覆盖当前进度，请确认粘贴的是你自己的备份。</div>
+  </div>`;
+  window.scrollTo(0,0);
+  const ta = document.getElementById("bak");
+  document.getElementById("back").onclick = renderHome;
+  document.getElementById("copy").onclick = ()=>{
+    ta.focus(); ta.select(); ta.setSelectionRange(0, ta.value.length);
+    let ok = false;
+    try{ ok = document.execCommand("copy"); }catch(e){}
+    toast(ok ? "已复制" : "已全选，请长按选择「复制」");
+  };
+  document.getElementById("import").onclick = ()=>{
+    let d = null;
+    try{ d = JSON.parse(ta.value); }catch(e){}
+    let p = d && d.progress ? d.progress : d;
+    if(!p || typeof p !== "object" || !p.words || typeof p.words !== "object"){
+      toast("这段内容不是有效的进度备份"); return;
+    }
+    if(!confirm("导入会覆盖当前进度，确定吗？")) return;
+    try{
+      localStorage.setItem(LS, JSON.stringify(p));
+      if(d && Array.isArray(d.history)){
+        SEARCH_HISTORY = d.history.filter(x => typeof x === "string").slice(0, 20);
+        saveSearchHistory();
+      }
+      toast("导入成功，正在重新加载…");
+      setTimeout(()=>location.reload(), 600);
+    }catch(e){ toast("导入失败：" + e.message); }
+  };
+}
+
 function renderHome(){
   screen = "home";
   const due = dueList(), wrong = wrongList();
@@ -892,6 +1011,18 @@ function renderHome(){
       <div class="l" style="font-weight:600;color:var(--ink)">介词要点</div>
       <div class="sub">语法笔记 · 城市国家前的介词、时间表达</div>
     </button>
+  </div>
+  <div class="reviews" style="padding-top:12px">
+    <button class="rcard" id="go-update">
+      <div style="font-size:22px">🔄</div>
+      <div class="l" style="font-weight:600;color:var(--ink)">检查更新</div>
+      <div class="sub">当前 v${APP_VERSION.name}${window.AndroidApp ? " · 应用内更新" : ""}</div>
+    </button>
+    <button class="rcard" id="go-backup">
+      <div style="font-size:22px">💾</div>
+      <div class="l" style="font-weight:600;color:var(--ink)">进度备份</div>
+      <div class="sub">导出 / 导入，换机或重装不丢</div>
+    </button>
   </div>`;
 
   for(const p of PARCOURS){
@@ -932,6 +1063,8 @@ function renderHome(){
   document.getElementById("go-gender").onclick = renderGenderIndex;
   document.getElementById("go-prep").onclick = renderPrepIndex;
   document.getElementById("go-prep-grammar").onclick = ()=> renderGrammarCat("prep");
+  document.getElementById("go-update").onclick = checkUpdate;
+  document.getElementById("go-backup").onclick = renderBackup;
 }
 
 /* ---------------- 查单词 ---------------- */
@@ -1049,6 +1182,17 @@ function searchResultsHTML(raw, res){
     </div>`).join("") + `</div>`;
 }
 
+function historyHTML(){
+  if(!SEARCH_HISTORY.length)
+    return `<div class="shint">输一个词就开始找。<br>
+      可以直接输法语（<b>classe</b>）、输中文（<b>教室</b>），
+      也可以输变位形式（<b>suis</b>、<b>vont</b>、<b>allée</b>），会自动告诉你原形是哪个动词。</div>`;
+  return `<div class="hwrap">
+    <div class="hhead"><span>最近搜索</span><button class="hclear" data-histclear="1">清空</button></div>
+    <div class="chiprow">${SEARCH_HISTORY.map(q =>
+      `<button class="chip hchip" data-hist="${esc(q)}">${esc(q)}</button>`).join("")}</div></div>`;
+}
+
 function renderSearch(q, back){
   SEARCH_QUERY = q || "";
   if(back) SEARCH_BACK = back;      // 从哪个界面点进来的，返回就回哪儿
@@ -1070,15 +1214,31 @@ function renderSearch(q, back){
   const paint = ()=>{
     const cnt = document.getElementById("scnt"), box = document.getElementById("sres");
     if(!cnt || !box) return;              // 已经切到别的页面了
-    const res = searchWords(inp.value);
-    cnt.textContent = inp.value.trim() ? res.length + " 个" : "";
-    box.innerHTML = searchResultsHTML(inp.value, res);
+    const raw = inp.value, has = !!raw.trim();
+    const res = has ? searchWords(raw) : [];
+    cnt.textContent = has ? res.length + " 个" : "";
+    box.innerHTML = has ? searchResultsHTML(raw, res) : historyHTML();
     app.querySelectorAll("#sres [data-fr]").forEach(e => e.onclick = ()=>{
       const w = SEARCH_WORDS.find(x => x.fr === e.dataset.fr);
-      if(w){ SV.w = w; SV.tense = "pr"; SV.from = inp.value; WORD_BACK = null; renderWordView(); }
+      if(w){
+        addSearchHistory(inp.value);
+        SV.w = w; SV.tense = "pr"; SV.from = inp.value; WORD_BACK = null; renderWordView();
+      }
+    });
+    const hc = box.querySelector("[data-histclear]");
+    if(hc) hc.onclick = ()=>{ clearSearchHistory(); paint(); };
+    box.querySelectorAll("[data-hist]").forEach(b => b.onclick = ()=>{
+      addSearchHistory(b.dataset.hist);
+      inp.value = b.dataset.hist;
+      inp.dispatchEvent(new Event("input"));
+      inp.focus();
+      inp.setSelectionRange(inp.value.length, inp.value.length);
     });
   };
   inp.addEventListener("input", paint);
+  inp.addEventListener("keydown", e=>{
+    if(e.key === "Enter"){ e.preventDefault(); addSearchHistory(inp.value); paint(); }
+  });
   document.getElementById("back").onclick = ()=> SEARCH_BACK();
 
   // 课外词按需加载：第一次进搜索页才去取 data_extra.js（约 1.7 MB），
@@ -1117,6 +1277,7 @@ function renderWordView(){
   </div>
   <div class="detail">
     ${detailBody(w, SV.tense)}
+    ${PREP[w.fr] ? prepUseBlock(w.fr, true) : ""}
     <div class="footer"><button class="btn ghost wide" id="back2">‹ ${WORD_BACK ? "返回" : "回到搜索"}</button></div>
   </div>`;
   window.scrollTo(0, 0);
@@ -2730,6 +2891,14 @@ function genderLabel(w){
   return "";
 }
 
+function nounGender(w){
+  const g = genderLabel(w);
+  if(g === "m./f.") return "mf";
+  if(g.startsWith("m.")) return "m";
+  if(g.startsWith("f.")) return "f";
+  return "";
+}
+
 function unitVocab(title, words){
   if(!words || !words.length) return "";
   return `<details class="unvocab"><summary>${esc(title)} · ${words.length} 个</summary>
@@ -2746,20 +2915,20 @@ function renderConjIndex(){
   let html = `<div class="topbar"><div class="back" id="back">‹</div>
     <div class="ttl">动词变位练习</div><div class="pill">现在时</div></div>
     <div class="ghead"><h1>现在时 · 情境句</h1>
-      <div class="sub">把动词放进真实句子里，选出正确的变位。答完会显示这个动词完整的现在时变位表。每个单元下方可以展开查看该单元的全部动词。</div></div>
+      <div class="sub">把动词放进真实句子里，选出正确的变位。答完会显示这个动词完整的现在时变位表。每一课下方可以展开查看该课的全部动词。</div></div>
     <div class="gindex">`;
   html += lessonGroup("全部", "", [lessonRow(0, "所有动词一起练",
     "第 1 到 14 课的全部动词", sqConj(VERBS).length + " 句", "data-sq", "conj:0")]);
   for(const p of PARCOURS){
-    const rows = p.nums.map(n=>{
+    const blocks = p.nums.map(n=>{
       const L = LESSONS.find(x=>x.s===n) || {s:n, fr:"", zh:""};
       const vs = verbsForLesson(n);
       return lessonRow(n, L.fr, "第" + n + "课 · " + L.zh,
-        sqConj(vs).length ? sqConj(vs).length + " 句" : "—", "data-sq", "conj:" + n);
+        sqConj(vs).length ? sqConj(vs).length + " 句" : "—", "data-sq", "conj:" + n) +
+        unitVocab("第" + n + "课动词", wordsForUnit([n], "verb")) +
+        unitVocab("第" + n + "课动词短语", verbPhrasesForUnit([n]));
     });
-    html += lessonGroup(p.name, p.sub, rows,
-      unitVocab("本单元动词", wordsForUnit(p.nums, "verb")) +
-      unitVocab("本单元动词短语", verbPhrasesForUnit(p.nums)));
+    html += lessonGroup(p.name, p.sub, blocks);
   }
   html += `</div>`;
   app.innerHTML = html;
@@ -2785,25 +2954,32 @@ function renderGenderIndex(){
     let h = lessonGroup(icon + " " + label, total + " 句",
       [lessonRow(0, "全部" + label, "一次练完", total + " 句", "data-sq", kind + ":0")]);
     for(const p of PARCOURS){
-      const rows = p.nums.map(n=>{
+      const blocks = p.nums.map(n=>{
         const L = LESSONS.find(x=>x.s===n) || {s:n, fr:"", zh:""};
         const lst = kind === "adj" ? adjsForLesson(n) : nounsForLesson(n);
         const cnt = kind === "adj" ? sqAdj(lst).length : sqNoun(lst).length;
-        return lessonRow(n, L.fr, "第" + n + "课 · " + L.zh, cnt ? cnt + " 句" : "—", "data-sq", kind + ":" + n);
+        const row = lessonRow(n, L.fr, "第" + n + "课 · " + L.zh, cnt ? cnt + " 句" : "—", "data-sq", kind + ":" + n);
+        let extra;
+        if(kind === "noun"){
+          const ns = wordsForUnit([n], "noun");
+          extra = unitVocab("第" + n + "课 · 阳性名词 (m.)", ns.filter(w => nounGender(w) === "m")) +
+                  unitVocab("第" + n + "课 · 阴性名词 (f.)", ns.filter(w => nounGender(w) === "f")) +
+                  unitVocab("第" + n + "课 · 通性名词 (m./f.)", ns.filter(w => nounGender(w) === "mf")) +
+                  unitVocab("第" + n + "课其他词类 / 短语", otherForUnit([n]));
+        }else{
+          extra = unitVocab("第" + n + "课形容词", wordsForUnit([n], "adj")) +
+                  unitVocab("第" + n + "课副词", wordsForUnit([n], "adv").concat(advPhrasesForUnit([n])));
+        }
+        return row + extra;
       });
-      const extra = kind === "noun"
-        ? unitVocab("本单元名词", wordsForUnit(p.nums, "noun")) +
-          unitVocab("本单元其他词类 / 短语", otherForUnit(p.nums))
-        : unitVocab("本单元形容词", wordsForUnit(p.nums, "adj")) +
-          unitVocab("本单元副词", wordsForUnit(p.nums, "adv").concat(advPhrasesForUnit(p.nums)));
-      h += lessonGroup(p.name, p.sub, rows, extra);
+      h += lessonGroup(p.name, p.sub, blocks);
     }
     return h;
   };
   let html = `<div class="topbar"><div class="back" id="back">‹</div>
     <div class="ttl">阴阳性练习</div><div class="pill">情境句</div></div>
     <div class="ghead"><h1>阴阳性 · 情境句</h1>
-      <div class="sub">名词练冠词（un / une / la / du……），形容词练性数配合。句子都带中文。各单元下方可以展开查看该单元的全部名词、形容词和副词。</div></div>
+      <div class="sub">名词练冠词（un / une / la / du……），形容词练性数配合。句子都带中文。每一课下方可以展开查看该课的全部名词（按阴阳性分组）、形容词和副词。</div></div>
     <div class="gindex">
       ${sec("名词阴阳性", "📦", NOUN_LIST, "noun", sqNoun(NOUN_LIST).length)}
       ${sec("形容词阴阳性", "🎨", ADJ_LIST, "adj", sqAdj(ADJ_LIST).length)}
@@ -2852,7 +3028,7 @@ function renderPrepIndex(){
     const rows = keys.map(k => `<div class="lesson" data-sq="prep:${esc(k)}">
       <div class="no">${icon}</div>
       <div class="mid"><div class="fr">${esc(k)}</div><div class="zh">${esc(PREP[k].use)}</div></div>
-      <div class="rt">${count(k)} 句</div></div>`);
+      <div class="rt">${count(k)} 句<br><button class="minibtn" data-prebinfo="${esc(k)}">用法</button></div></div>`);
     html += lessonGroup(icon + " " + label, sqPrep(keys).length + " 句", rows);
   }
   html += `</div>`;
@@ -2866,6 +3042,63 @@ function renderPrepIndex(){
       startSQ(sqPrep(keys), k === "__all" ? "全部介词" : "介词 · " + k, renderPrepIndex);
     };
   });
+  app.querySelectorAll("[data-prebinfo]").forEach(b=>{
+    b.onclick = e=>{ e.stopPropagation(); openPrepDetail(b.dataset.prebinfo); };
+  });
+}
+
+/* ---- 介词详情：用法 / 规则 / 常见搭配 / 例句 ---- */
+function prepUseBlock(key, full){
+  const d = PREP[key];
+  if(!d) return "";
+  const syn = SYN[key] || {};
+  const cols = [].concat(syn.col || [], syn.syn || [], syn.ant || []);
+  const sents = full ? d.sent : d.sent.slice(0, 3);
+  return `<div class="gblock" style="width:100%;margin-top:12px">
+    <h3>${esc(key)} · 常见用法</h3>
+    <div class="gtxt"><b>用法：</b>${esc(d.use)}</div>
+    <div class="gtxt" style="margin-top:6px"><b>规则：</b>${esc(d.rule)}</div>
+    ${cols.length ? `<div class="unlab">常见搭配</div><div class="chiprow">${cols.map(x =>
+      `<span class="chip">${esc(x)}</span>`).join("")}</div>` : ""}
+    <div class="unlab">例句</div>
+    ${sents.map(e => {
+      const fr = e.s.replace("___", e.a);
+      return `<div class="tline"><button class="sp js-say" data-say="${esc(fr)}">🔊</button>
+        <div class="tx">${esc(fr)}<div class="cn">${esc(e.zh || "")}</div>
+        ${e.note ? `<div class="cn">${esc(e.note)}</div>` : ""}</div></div>`;
+    }).join("")}
+  </div>`;
+}
+
+function renderPrepDetail(key, back){
+  const d = PREP[key];
+  if(!d){ renderPrepIndex(); return; }
+  screen = "prepview";
+  PREP_VIEW = { key, back: back || renderPrepIndex };
+  stopAll();
+  app.innerHTML = `
+  <div class="topbar"><div class="back" id="back">‹</div>
+    <div class="ttl">介词 · ${esc(key)}</div><div class="pill">用法</div></div>
+  <div class="ghead"><h1>${esc(key)}</h1>
+    <div class="sub">${esc(d.use)}</div></div>
+  <div class="gindex">
+    ${prepUseBlock(key, true)}
+    <button class="btn primary wide" id="prepgo" style="margin-top:16px">开始练习这一组（${d.sent.length} 句）</button>
+  </div>`;
+  window.scrollTo(0,0);
+  document.getElementById("back").onclick = PREP_VIEW.back;
+  document.getElementById("prepgo").onclick = ()=>startSQ(sqPrep([key]), "介词 · " + key, renderPrepIndex);
+  app.querySelectorAll(".js-say").forEach(b=> b.onclick = ()=>{ stopAll(); speak(b.dataset.say); });
+  prefetchAudio(d.sent.map(e => e.s.replace("___", e.a)));
+}
+
+function openPrepDetail(key){
+  const y = window.scrollY;
+  const back = ()=>{
+    renderPrepIndex();
+    setTimeout(()=>window.scrollTo(0, y), 0);
+  };
+  renderPrepDetail(key, back);
 }
 
 /* ---- 答题 ---- */

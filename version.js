@@ -1,0 +1,1 @@
+window.__APP_VERSION={"code": 2, "name": "1.1", "size": 132987987, "parts": ["update/part1.bin", "update/part2.bin", "update/part3.bin"]};
