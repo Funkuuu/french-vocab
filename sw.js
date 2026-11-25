@@ -17,7 +17,7 @@
    （这个坑也踩过，见 slice() / fillAndSlice()。）
 
    想强制让所有人更新时，把下面的版本号 +1 再重新传。 */
-const CACHE = "fr-vocab-v20";
+const CACHE = "fr-vocab-v21";
 
 const SHELL = [
   "./",
@@ -104,7 +104,7 @@ self.addEventListener("fetch", e => {
   const range = req.headers.get("range");
 
   // 版本文件 / APK 分片不缓存：分片有 100+ MB，缓存它们既占空间又容易拿到旧版本。
-  if (/\/update\/|version\.(js|json)$/.test(url.pathname)) {
+  if (/\/update\/|version\.(js|json)$|\.apk$/i.test(url.pathname)) {
     e.respondWith(fetch(req).catch(() => Response.error()));
     return;
   }
