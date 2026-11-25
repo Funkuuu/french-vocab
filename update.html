@@ -15,7 +15,10 @@
     box-shadow:0 6px 24px rgba(30,50,80,.07)}
   a.btn{display:block;text-align:center;text-decoration:none;border-radius:14px;padding:15px 18px;
     font-size:16px;font-weight:600;background:var(--brand);color:#fff}
+  a.alt{display:block;text-align:center;text-decoration:none;border-radius:12px;padding:11px 14px;
+    margin-top:10px;font-size:14px;color:var(--brand);border:1px solid var(--line);background:#fff}
   .tips{margin-top:16px;font-size:12.5px;color:var(--ink3);line-height:1.8}
+  .small{font-size:12px;color:var(--ink3);margin-top:6px;text-align:center}
 </style>
 </head>
 <body>
@@ -24,22 +27,36 @@
   <p>下载后直接打开安装包，会<b>覆盖旧版本</b>，学习进度、错词本会保留。</p>
   <div class="card">
     <p style="margin-top:0">当前提供版本：<b id="ver">读取中…</b></p>
-    <a class="btn" id="dl" href="french-vocab.apk" download>下载并安装</a>
+    <a class="btn" id="fast" href="french-vocab.apk">下载并安装</a>
+    <div class="small">推荐线路（国内一般较快）</div>
+    <a class="alt" id="m2" href="french-vocab.apk">线路二</a>
+    <a class="alt" id="m3" href="french-vocab.apk">线路三</a>
+    <a class="alt" id="m4" href="french-vocab.apk">直连 GitHub（可能较慢）</a>
   </div>
   <div class="tips">
+    · 哪个线路快就用哪个，下载的是同一个安装包；<br>
+    · 如果都很慢，开一下加速器再点；<br>
     · 下载完成后在通知栏或「下载」里点开 APK 安装；<br>
-    · 如果提示「不允许安装未知应用」，按提示给浏览器授权；<br>
     · 安装时不要先卸载旧版，覆盖安装才能保留进度；<br>
     · 精简版包含全部教材音频；课外词音频在联网时播放。
   </div>
 </div>
 <script>
+const raw = "https://raw.githubusercontent.com/Funkuuu/french-vocab/main/french-vocab.apk";
+const links = [
+  ["fast", "https://ghfast.top/" + raw],
+  ["m2", "https://gh-proxy.com/" + raw],
+  ["m3", "https://ghproxy.imciel.com/" + raw],
+  ["m4", "french-vocab.apk"]
+];
+for (const [id, url] of links) document.getElementById(id).href = url;
+
 fetch("version.json?t=" + Date.now(), { cache: "no-store" })
   .then(r => r.json())
   .then(v => {
     const mb = v.size ? Math.round(v.size / 1048576) : "";
     document.getElementById("ver").textContent = (v.name || v.code || "?") + (mb ? "（约 " + mb + " MB）" : "");
-    document.getElementById("dl").textContent = "下载并安装" + (mb ? "（约 " + mb + " MB）" : "");
+    document.getElementById("fast").textContent = "下载并安装" + (mb ? "（约 " + mb + " MB）" : "");
   })
   .catch(() => { document.getElementById("ver").textContent = "读取失败"; });
 </script>

@@ -495,7 +495,7 @@ const DAY = 86400000;
 const BOOK_TITLE = "《新经典法语 1 学生用书》（第二版）";
 const BOOK_CREDIT = "傅荣 总主编，胡瑜 主编，吴云凤 等编，外语教学与研究出版社，2022";
 /* 版本号：和 android/version.json 保持一致。发布新 APK 时两边一起改。 */
-const APP_VERSION = { code: 4, name: "1.3" };
+const APP_VERSION = { code: 5, name: "1.4" };
 const UPDATE_PAGE = "https://funkuuu.github.io/french-vocab/update.html";
 const APK_URL = "https://funkuuu.github.io/french-vocab/french-vocab.apk";
 const VERSION_JS = "https://funkuuu.github.io/french-vocab/version.js";
@@ -879,8 +879,8 @@ function checkUpdate(){
   const installed = (window.AndroidApp && window.AndroidApp.versionCode)
     ? AndroidApp.versionCode() : APP_VERSION.code;
   const openPage = ()=>{
-    if(window.AndroidApp && window.AndroidApp.openUrl) AndroidApp.openUrl(APK_URL);
-    else window.open(APK_URL, "_blank");
+    if(window.AndroidApp && window.AndroidApp.openUrl) AndroidApp.openUrl(UPDATE_PAGE);
+    else window.open(UPDATE_PAGE, "_blank");
   };
   const s = document.createElement("script");
   s.src = VERSION_JS + "?t=" + Date.now();
@@ -890,7 +890,7 @@ function checkUpdate(){
     if((v.code || 0) > installed){
       const mb = v.size ? Math.round(v.size / 1048576) + " MB" : "";
       if(confirm("发现新版本 " + (v.name || v.code) + (mb ? "（约 " + mb + "）" : "") +
-                 "。\n\n下载后覆盖安装即可，学习进度会保留。\n现在下载吗？")) openPage();
+                 "。\n\n下载后覆盖安装即可，学习进度会保留。\n现在打开下载页吗？")) openPage();
     }else{
       toast("已经是最新版本（" + (v.name || APP_VERSION.name) + "）");
     }

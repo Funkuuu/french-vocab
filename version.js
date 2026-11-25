@@ -1,1 +1,1 @@
-window.__APP_VERSION={"code": 4, "name": "1.3", "size": 33994663, "apk": "french-vocab.apk"};
+window.__APP_VERSION={"code": 5, "name": "1.4", "size": 33994663, "apk": "french-vocab.apk"};
