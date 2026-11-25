@@ -495,7 +495,7 @@ const DAY = 86400000;
 const BOOK_TITLE = "《新经典法语 1 学生用书》（第二版）";
 const BOOK_CREDIT = "傅荣 总主编，胡瑜 主编，吴云凤 等编，外语教学与研究出版社，2022";
 /* 版本号：和 android/version.json 保持一致。发布新 APK 时两边一起改。 */
-const APP_VERSION = { code: 2, name: "1.1" };
+const APP_VERSION = { code: 3, name: "1.2" };
 const UPDATE_PAGE = "https://funkuuu.github.io/french-vocab/update.html";
 const VERSION_JS = "https://funkuuu.github.io/french-vocab/version.js";
 /* 进度存在 localStorage 的这个键下：{lessons, words, wrong}
@@ -1186,7 +1186,8 @@ function historyHTML(){
   if(!SEARCH_HISTORY.length)
     return `<div class="shint">输一个词就开始找。<br>
       可以直接输法语（<b>classe</b>）、输中文（<b>教室</b>），
-      也可以输变位形式（<b>suis</b>、<b>vont</b>、<b>allée</b>），会自动告诉你原形是哪个动词。</div>`;
+      也可以输变位形式（<b>suis</b>、<b>vont</b>、<b>allée</b>），会自动告诉你原形是哪个动词。<br>
+      词库共 ${SEARCH_WORDS.length} 个词（教材 ${WORDS.length} 个 + 课外 ${SEARCH_WORDS.length - WORDS.length} 个）。</div>`;
   return `<div class="hwrap">
     <div class="hhead"><span>最近搜索</span><button class="hclear" data-histclear="1">清空</button></div>
     <div class="chiprow">${SEARCH_HISTORY.map(q =>
@@ -1236,6 +1237,10 @@ function renderSearch(q, back){
     });
   };
   inp.addEventListener("input", paint);
+  // 点击/聚焦时如果已有内容就全选：一个动作就能删掉上一个词
+  const selectAll = ()=>{ if(inp.value.trim()){ try{ inp.select(); }catch(e){} } };
+  inp.addEventListener("focus", ()=>setTimeout(selectAll, 0));
+  inp.addEventListener("click", selectAll);
   inp.addEventListener("keydown", e=>{
     if(e.key === "Enter"){ e.preventDefault(); addSearchHistory(inp.value); paint(); }
   });
@@ -1257,7 +1262,12 @@ function renderSearch(q, back){
     });
   }
   inp.focus();
-  inp.setSelectionRange(inp.value.length, inp.value.length);
+  // 搜完一个词回到搜索页 / 再点搜索框时，直接全选已有内容，方便删掉重输
+  if(inp.value.trim()){
+    setTimeout(()=>{ try{ inp.select(); }catch(e){} }, 0);
+  }else{
+    inp.setSelectionRange(0, 0);
+  }
 }
 
 // 从搜索点进来的详情页，和错词本那个共用 detailBody
@@ -3312,7 +3322,7 @@ app.addEventListener("click", e=>{
 document.getElementById("gbar").onclick = ()=>{
   if(screen === "search"){
     const inp = document.getElementById("q2");
-    if(inp){ inp.focus(); return; }
+    if(inp){ inp.focus(); try{ if(inp.value.trim()) inp.select(); }catch(e){} return; }
   }
   // 已经在词详情里：回到进来时那份搜索结果（SEARCH_BACK 仍是更早的界面）
   if(screen === "wordview"){ renderSearch(SV.from, SEARCH_BACK); return; }
